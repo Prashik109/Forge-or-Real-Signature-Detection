@@ -1,0 +1,51 @@
+import fitz  # PyMuPDF
+import os
+from PIL import Image
+import numpy as np
+from tensorflow.keras.models import load_model
+from tensorflow.keras.preprocessing import image
+
+# === CONFIG ===
+PDF_FILE = 'Fake _sign.pdf'  # Place this file in the same folder as this script
+MODEL_PATH = 'C:/Users/Asus/Downloads/real_forge_signature_binary_model.h5'
+OUTPUT_DIR = 'extracted_signatures'
+
+# === SETUP ===
+os.makedirs(OUTPUT_DIR, exist_ok=True)
+doc = fitz.open(PDF_FILE)
+model = load_model(MODEL_PATH)
+
+keywords = ['signature', 'signed', 'signatory']
+sig_count = 0
+
+def model_predict(img_path):
+    img = image.load_img(img_path, target_size=(256, 256))
+    x = image.img_to_array(img) / 255.0
+    x = np.expand_dims(x, axis=0)
+    pred = model.predict(x)
+    return "REAL" if pred[0][0] >= 0.5 else "FORGED"
+
+# === EXTRACT AND CLASSIFY ===
+for page_num in range(len(doc)):
+    page = doc.load_page(page_num)
+    words = page.get_text("words")
+
+    for w in words:
+        word_text = w[4].lower()
+        if any(kw in word_text for kw in keywords):
+            x0, y0, x1, y1 = w[0], w[1], w[2], w[3]
+            rect = fitz.Rect(x0 - 50, y0 + 10, x1 + 300, y1 + 80)
+            try:
+                pix = page.get_pixmap(clip=rect, dpi=200)
+                sig_path = os.path.join(OUTPUT_DIR, f"signature_{page_num+1}_{sig_count+1}.png")
+                pix.save(sig_path)
+                sig_count += 1
+
+                # Predict
+                result = model_predict(sig_path)
+                print(f"[Page {page_num+1}] Signature {sig_count}: {result}")
+
+            except Exception as e:
+                print(f"❌ Error on page {page_num+1}: {e}")
+
+print(f"\n✅ Done: {sig_count} signatures processed.")
